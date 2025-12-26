@@ -1,3 +1,15 @@
+<p align="center">
+  <a href="README.md">English</a> |
+  <a href="README_KO.md">한국어</a> |
+  <a href="README_JA.md">日本語</a> |
+  <a href="README_ZH.md">中文</a> |
+  <a href="README_FR.md">Français</a>
+</p>
+
+<p align="center">
+  <img src="src/main/resources/image/logo.png" alt="H2H-CAPTCHA Logo" width="200" />
+</p>
+
 # Human-to-Human CAPTCHA (H2H-CAPTCHA)
 
 > **"기계가 아닌 사람이 직접 검증하는 실시간 캡차 시스템"**
