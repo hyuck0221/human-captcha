@@ -1,0 +1,9 @@
+services:
+  app:
+    build: .
+    container_name: human-captcha-app
+    ports:
+      - "8080:8080"
+    restart: always
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod

@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>H2H Captcha - Validator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.0/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            text-align: center; 
+            margin: 0;
+            background: #0f0f0f;
+            color: #ccc;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        h1 { margin-top: 20px; color: #03dac6; }
+        #status { font-weight: bold; margin-bottom: 20px; color: #bb86fc; }
+        
+        .main-layout { display: flex; gap: 20px; width: 95%; max-width: 1400px; justify-content: center; align-items: flex-start; }
+        
+        /* Client Mirror View Wrapper */
+        .client-view-wrapper {
+            position: relative;
+        }
+
+        .client-view-container {
+            background: #2b2b2b;
+            color: #000;
+            width: 800px; 
+            height: 500px;
+            padding: 0;
+            border-radius: 5px;
+            position: relative;
+            border: 4px solid #444;
+            overflow: hidden; 
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+        }
+        
+        .client-screen-content {
+            width: 100%; height: 100%; position: relative; background: #121212;
+            display: flex; justify-content: center; align-items: center;
+        }
+        
+        .game-container-mirror {
+            background: rgba(30, 30, 30, 0.9);
+            padding: 10px;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            width: 60%;
+            border: 1px solid #333;
+            color: #e0e0e0;
+            text-align: center;
+            display: none; 
+            position: relative;
+            z-index: 100; /* Below pointer */
+        }
+
+        .client-view-title { 
+            position: absolute; top: -25px; left: 0; background: #03dac6; color: #000; 
+            padding: 2px 10px; font-weight: bold; font-size: 0.8em; border-radius: 4px 4px 0 0;
+        }
+        .client-res-info {
+            position: absolute; top: -25px; right: 0; background: #444; color: #fff;
+            padding: 2px 10px; font-size: 0.8em; border-radius: 4px 4px 0 0;
+        }
+
+        /* Pointer - Highest Z-Index */
+        .pointer {
+            width: 12px; height: 12px; background: rgba(255, 0, 0, 0.7); 
+            border: 2px solid white; border-radius: 50%; 
+            position: absolute; pointer-events: none; display: none; z-index: 9999;
+        }
+        
+        /* Mirror Task Elements */
+        .mirror-task-content { margin-top: 10px; display: flex; justify-content: center; }
+        
+        /* The Actual Canvas Mirror */
+        #mirror-canvas {
+            width: 300px; height: 225px; border: 2px solid #555; background: #fff; 
+            display: none; cursor: default; pointer-events: none;
+        }
+        
+        #mirror-rps { display: none; }
+        .rps-card { font-size: 2em; margin: 5px; display: inline-block; opacity: 0.5; }
+        
+        #mirror-chat { display: none; height: 200px; width: 100%; overflow-y: auto; background: #222; border: 1px solid #444; padding: 5px; text-align: left; box-sizing: border-box; }
+
+        /* Validator Controls */
+        .controls-panel {
+            background: #1e1e1e;
+            padding: 20px;
+            border-radius: 10px;
+            width: 320px;
+            text-align: left;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            display: flex; flex-direction: column; gap: 10px;
+        }
+        .controls-panel h3 { margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 10px; color: #fff; }
+        
+        .task-btn {
+            display: block; width: 100%; padding: 12px;
+            background: #333; color: #fff; border: 1px solid #555; cursor: pointer;
+            transition: 0.2s; border-radius: 5px; text-align: left; font-size: 1em;
+        }
+        .task-btn:hover { background: #444; border-color: #03dac6; padding-left: 15px; }
+        
+        .action-btn {
+            width: 48%; padding: 15px; margin-top: 10px; font-weight: bold; cursor: pointer; border: none; border-radius: 5px; font-size: 1.1em;
+        }
+        #btn-approve { background: #03dac6; color: #000; float: left; }
+        #btn-reject { background: #cf6679; color: #000; float: right; }
+        
+        #rps-controls, #chat-controls { display: none; background: #222; padding: 10px; border-radius: 5px; margin-top: 10px; }
+        .rps-mini-btn { font-size: 1.5em; cursor: pointer; background: none; border: 1px solid #555; border-radius: 5px; margin: 5px; color: #fff; }
+        .rps-mini-btn:hover { background: #444; border-color: #ffeb3b; }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <h1 id="lbl-title">Validator Console</h1>
+    <div id="status">Connecting...</div>
+    
+    <div id="main-interface" class="main-layout hidden">
+        
+        <div class="client-view-wrapper">
+            <div class="client-view-title">CLIENT VIEW <span id="client-lang"></span></div>
+            <div class="client-res-info" id="client-res">Waiting...</div>
+            
+            <div class="client-view-container">
+                <div class="client-screen-content" id="screen-mirror">
+                    <div id="ghostPointer" class="pointer"></div>
+                    
+                    <!-- Mirror of Game Container -->
+                    <div id="mirror-game-container" class="game-container-mirror">
+                        <div id="mirror-task-info" style="color: #ffb74d; font-weight: bold; margin-bottom: 10px;">Mission</div>
+                        
+                        <div class="mirror-task-content">
+                            <canvas id="mirror-canvas" width="300" height="225"></canvas>
+                            
+                            <div id="mirror-rps" style="display:none;">
+                                <div class="rps-card">✊</div>
+                                <div class="rps-card">✋</div>
+                                <div class="rps-card">✌️</div>
+                                <div id="client-rps-choice" style="margin-top:10px; font-size: 0.9em; color: #aaa;">Waiting...</div>
+                            </div>
+
+                            <div style="width: 100%;">
+                                <div id="mirror-chat" style="display:none;"></div>
+                                <div id="mirror-chat-typing" style="display:none; color: #03dac6; text-align: left; font-size: 0.8em; padding: 5px; border-top: 1px solid #444;">Typing: ...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Validator Controls -->
+        <div class="controls-panel">
+            <h3 id="lbl-task-control">Task Control</h3>
+            <button class="task-btn" onclick="changeTask('DRAWING')">✏️ Drawing</button>
+            <button class="task-btn" onclick="changeTask('RPS')">👊 Rock Paper Scissors</button>
+            <button class="task-btn" onclick="changeTask('CHAT')">💬 Chat</button>
+
+            <div id="rps-controls">
+                <p id="lbl-challenge" style="margin: 0 0 10px 0; color: #ccc;">Challenge Client:</p>
+                <button class="rps-mini-btn" onclick="sendRpsChallenge('ROCK')">✊</button>
+                <button class="rps-mini-btn" onclick="sendRpsChallenge('PAPER')">✋</button>
+                <button class="rps-mini-btn" onclick="sendRpsChallenge('SCISSORS')">✌️</button>
+            </div>
+
+            <div id="chat-controls">
+                 <div style="display:flex;">
+                     <input type="text" id="chat-input" placeholder="..." style="flex:1; padding: 5px;" onkeypress="if(event.keyCode==13) sendChat()">
+                     <button id="chat-send" onclick="sendChat()" style="width: 50px;">Send</button>
+                 </div>
+            </div>
+
+            <div style="margin-top: auto; overflow: hidden;">
+                <button id="btn-approve" class="action-btn" onclick="sendDecision(true)">Approve</button>
+                <button id="btn-reject" class="action-btn" onclick="sendDecision(false)">Reject</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const DICT = {
+            'en': {
+                'title': 'Validator Console', 'connecting': 'Connecting...', 'connected': 'Connected. Waiting for user...',
+                'observing': 'Observing Client...', 'client_view': 'CLIENT VIEW', 'task_control': 'Task Control',
+                'approve': 'Approve', 'reject': 'Reject', 'challenge': 'Challenge Client:',
+                'chat_ph': 'Say something...', 'send': 'Send',
+                'client_choice': 'Client Chose: ', 'challenge_sent': 'Challenge Sent: ',
+                'session_ended': 'Session Ended: ',
+                'prompt_topic': 'Enter a topic for drawing (e.g., Apple, Car):',
+                'lang_en': 'English', 'lang_ko': 'Korean', 'lang_ja': 'Japanese', 'lang_zh': 'Chinese', 'lang_fr': 'French',
+                'ROCK': 'Rock', 'PAPER': 'Paper', 'SCISSORS': 'Scissors'
+            },
+            'ko': {
+                'title': '검증자 콘솔', 'connecting': '연결 중...', 'connected': '연결됨. 사용자 대기 중...',
+                'observing': '사용자 관찰 중...', 'client_view': '사용자 화면', 'task_control': '작업 제어',
+                'approve': '승인 (사람)', 'reject': '거절 (로봇)', 'challenge': '가위바위보 내기:',
+                'chat_ph': '메시지 입력...', 'send': '전송',
+                'client_choice': '사용자 선택: ', 'challenge_sent': '제출함: ',
+                'session_ended': '세션 종료: ',
+                'prompt_topic': '그리기 주제어를 입력하세요 (예: 사과, 자동차):',
+                'lang_en': '영어', 'lang_ko': '한국어', 'lang_ja': '일본어', 'lang_zh': '중국어', 'lang_fr': '프랑스어',
+                'ROCK': '바위', 'PAPER': '보', 'SCISSORS': '가위'
+            },
+            'ja': {
+                'title': '検証コンソール', 'connecting': '接続中...', 'connected': '接続済み。待機中...',
+                'observing': '観察中...', 'client_view': 'クライアント画面', 'task_control': 'タスク制御',
+                'approve': '承認', 'reject': '拒否', 'challenge': 'じゃんけん:',
+                'chat_ph': '入力...', 'send': '送信',
+                'client_choice': 'クライアントの選択: ', 'challenge_sent': '送信済み: ',
+                'session_ended': 'セッション終了: ',
+                'prompt_topic': '描画のお題を入力してください（例：リンゴ、車）:',
+                'lang_en': '英語', 'lang_ko': '韓国語', 'lang_ja': '日本語', 'lang_zh': '中国語', 'lang_fr': 'フランス語',
+                'ROCK': 'グー', 'PAPER': 'パー', 'SCISSORS': 'チョキ'
+            },
+            'zh': {
+                'title': '验证控制台', 'connecting': '连接中...', 'connected': '已连接。等待用户...',
+                'observing': '观察中...', 'client_view': '客户端视图', 'task_control': '任务控制',
+                'approve': '批准', 'reject': '拒绝', 'challenge': '挑战用户:',
+                'chat_ph': '输入...', 'send': '发送',
+                'client_choice': '用户选择: ', 'challenge_sent': '已发送: ',
+                'session_ended': '会话结束: ',
+                'prompt_topic': '请输入绘画主题（例如：苹果，汽车）:',
+                'lang_en': '英语', 'lang_ko': '韩语', 'lang_ja': '日语', 'lang_zh': '中文', 'lang_fr': '法语',
+                'ROCK': '石头', 'PAPER': '布', 'SCISSORS': '剪刀'
+            },
+            'fr': {
+                'title': 'Console de Validation', 'connecting': 'Connexion...', 'connected': 'Connecté. En attente...',
+                'observing': 'Observation...', 'client_view': 'VUE CLIENT', 'task_control': 'Contrôle des Tâches',
+                'approve': 'Approuver', 'reject': 'Rejeter', 'challenge': 'Défier le client:',
+                'chat_ph': 'Dire quelque chose...', 'send': 'Envoyer',
+                'client_choice': 'Choix du client : ', 'challenge_sent': 'Défi envoyé : ',
+                'session_ended': 'Session terminée : ',
+                'prompt_topic': 'Entrez un sujet de dessin (ex: Pomme, Voiture):',
+                'lang_en': 'Anglais', 'lang_ko': 'Coréen', 'lang_ja': 'Japonais', 'lang_zh': 'Chinois', 'lang_fr': 'Français',
+                'ROCK': 'Pierre', 'PAPER': 'Feuille', 'SCISSORS': 'Ciseaux'
+            }
+        };
+
+        var stompClient = null;
+        var mirrorCanvas = document.getElementById('mirror-canvas');
+        var mirrorCtx = null; 
+        var ghost = document.getElementById('ghostPointer');
+        var currentTask = null;
+        var myUuid = getOrCreateUuid();
+        var urlParams = new URLSearchParams(window.location.search);
+        var myLang = urlParams.get('lang') || 'en';
+
+        function getOrCreateUuid() {
+            var uuid = localStorage.getItem('h2h_captcha_uuid_validator');
+            if (!uuid) {
+                uuid = generateUUID();
+                localStorage.setItem('h2h_captcha_uuid_validator', uuid);
+            }
+            return uuid;
+        }
+
+        function generateUUID() {
+            var d = new Date().getTime();
+            if (typeof performance !== 'undefined' && typeof performance.now === 'function'){ d += performance.now(); }
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                var r = (d + Math.random() * 16) % 16 | 0; d = Math.floor(d / 16);
+                return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+            });
+        }
+
+        function connect() {
+            var socket = new SockJS('/ws-captcha');
+            stompClient = Stomp.over(socket);
+            stompClient.connect({}, function (frame) {
+                document.getElementById('status').innerText = t('connected');
+                stompClient.subscribe('/topic/private.' + myUuid, function (message) {
+                    var body = message.body;
+                    try {
+                        var json = JSON.parse(body);
+                        if (json.taskType) { 
+                             startSession(json);
+                        } else if (json.x !== undefined) { 
+                             drawMouse(json);
+                        } else if (json.type) { 
+                             handleGameData(json);
+                        }
+                    } catch(e) {
+                        reset(body);
+                    }
+                });
+                stompClient.send("/app/join/validator", {}, JSON.stringify({'uuid': myUuid, 'language': myLang}));
+            });
+        }
+
+        function t(key) { return (DICT[myLang] && DICT[myLang][key]) || DICT['en'][key] || key; }
+
+        function startSession(matchInfo) {
+            document.getElementById('main-interface').classList.remove('hidden');
+            document.getElementById('status').innerText = t('observing');
+            var pLangName = t('lang_' + matchInfo.clientLanguage);
+            document.getElementById('client-lang').innerText = "(" + pLangName + ")";
+            
+            mirrorCtx = mirrorCanvas.getContext('2d');
+            updateTaskUI(matchInfo.taskType);
+        }
+
+        function changeTask(taskName) {
+            var payload = taskName;
+            if (taskName === 'DRAWING') {
+                var topic = prompt(t('prompt_topic'), "Apple");
+                if (topic) payload = "DRAWING:" + topic;
+                else return;
+            }
+            stompClient.send("/app/game", {}, JSON.stringify({ 'type': 'TASK_CHANGE', 'payload': payload }));
+            updateTaskUI(payload);
+        }
+
+        function updateTaskUI(taskData) {
+            var taskName = taskData.startsWith("DRAWING:") ? "DRAWING" : taskData;
+            currentTask = taskName;
+            
+            var mirrorContainer = document.getElementById('mirror-game-container');
+            var mirrorChat = document.getElementById('mirror-chat');
+            var mirrorChatTyping = document.getElementById('mirror-chat-typing');
+            
+            if (taskName === 'MOUSE_TRACKING') {
+                mirrorContainer.style.display = 'none';
+            } else {
+                mirrorContainer.style.display = 'block';
+                document.getElementById('mirror-task-info').innerText = "Mission: " + taskName;
+            }
+            
+            mirrorCanvas.style.display = 'none';
+            document.getElementById('mirror-rps').style.display = 'none';
+            mirrorChat.style.display = 'none';
+            mirrorChatTyping.style.display = 'none';
+            document.getElementById('rps-controls').style.display = 'none';
+            document.getElementById('chat-controls').style.display = 'none';
+
+            if (currentTask === 'DRAWING') {
+                mirrorCtx.clearRect(0, 0, mirrorCanvas.width, mirrorCanvas.height);
+                mirrorCanvas.style.display = 'block';
+            } else if (currentTask === 'RPS') {
+                document.getElementById('mirror-rps').style.display = 'block';
+                document.getElementById('rps-controls').style.display = 'block';
+                document.getElementById('client-rps-choice').innerText = "Waiting...";
+            } else if (currentTask === 'CHAT') {
+                mirrorChat.style.display = 'block';
+                mirrorChatTyping.style.display = 'block';
+                document.getElementById('chat-controls').style.display = 'block';
+            }
+            ghost.style.display = 'block';
+        }
+
+        function sendRpsChallenge(move) {
+             stompClient.send("/app/game", {}, JSON.stringify({ 'type': 'RPS_CHALLENGE', 'payload': move }));
+             var translatedMove = t(move);
+             document.getElementById('client-rps-choice').innerText = t('challenge_sent') + translatedMove;
+        }
+
+        function drawMouse(pos) {
+             var container = document.getElementById('screen-mirror');
+             
+             if(pos.w && pos.h) {
+                 document.getElementById('client-res').innerText = pos.w + " x " + pos.h;
+                 var clientRatio = pos.w / pos.h;
+                 var maxW = 800; 
+                 var maxH = 500; 
+                 var wrapperRatio = maxW / maxH;
+
+                 if (clientRatio > wrapperRatio) {
+                     container.style.width = maxW + "px";
+                     container.style.height = (maxW / clientRatio) + "px";
+                     container.style.marginTop = (maxH - (maxW / clientRatio)) / 2 + "px";
+                     container.style.marginLeft = "0px";
+                 } else {
+                     container.style.height = maxH + "px";
+                     container.style.width = (maxH * clientRatio) + "px";
+                     container.style.marginTop = "0px";
+                     container.style.marginLeft = (maxW - (maxH * clientRatio)) / 2 + "px";
+                 }
+             }
+
+             var w = container.clientWidth;
+             var h = container.clientHeight;
+             var px = pos.x * w;
+             var py = pos.y * h;
+             
+             ghost.style.left = px + 'px';
+             ghost.style.top = py + 'px';
+             
+             if (currentTask === 'DRAWING' && pos.isDown && pos.cx >= 0 && pos.cx <= 1 && pos.cy >= 0 && pos.cy <= 1 && mirrorCtx) {
+                 var tx = pos.cx * mirrorCanvas.width;
+                 var ty = pos.cy * mirrorCanvas.height;
+                 mirrorCtx.fillStyle = "black";
+                 mirrorCtx.fillRect(tx, ty, 2, 2); 
+             }
+        }
+
+        function handleGameData(data) {
+            if (data.type === 'RPS') {
+                var translatedMove = t(data.payload);
+                document.getElementById('client-rps-choice').innerText = t('client_choice') + translatedMove;
+            } else if (data.type === 'CHAT') {
+                addMessage("Client", data.payload, 'them');
+                document.getElementById('mirror-chat-typing').innerText = ""; 
+            } else if (data.type === 'CHAT_TYPING') {
+                document.getElementById('mirror-chat-typing').innerText = "Typing: " + data.payload;
+            }
+        }
+
+        function sendChat() {
+            var input = document.getElementById('chat-input');
+            var text = input.value;
+            if(!text) return;
+            stompClient.send("/app/game", {}, JSON.stringify({ 'type': 'CHAT', 'payload': text }));
+            addMessage("Me", text, 'me');
+            input.value = '';
+        }
+
+        function addMessage(sender, text, type) {
+            var div = document.createElement('div');
+            div.style.marginBottom = "5px";
+            div.style.color = (type === 'me') ? '#007bff' : '#ccc';
+            div.style.textAlign = (type === 'me') ? 'right' : 'left';
+            div.innerText = sender + ": " + text;
+            var box = document.getElementById('mirror-chat');
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function sendDecision(approved) {
+            stompClient.send("/app/decision", {}, JSON.stringify({'approved': approved}));
+            document.getElementById('status').innerText = 'Decision Sent...';
+            document.getElementById('main-interface').classList.add('hidden');
+        }
+        
+        function reset(msg) {
+             document.getElementById('status').innerText = t('session_ended') + msg;
+             document.getElementById('main-interface').classList.add('hidden');
+             setTimeout(function(){ location.reload(); }, 2000);
+        }
+
+        document.getElementById('lbl-title').innerText = t('title');
+        document.getElementById('status').innerText = t('connecting');
+        document.getElementById('lbl-task-control').innerText = t('task_control');
+        document.getElementById('btn-approve').innerText = t('approve');
+        document.getElementById('btn-reject').innerText = t('reject');
+        document.getElementById('chat-input').placeholder = t('chat_ph');
+        document.getElementById('chat-send').innerText = t('send');
+        document.getElementById('lbl-challenge').innerText = t('challenge');
+
+        connect();
+    </script>
+</body>
+</html>

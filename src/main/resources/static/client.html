@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>H2H Captcha - Client</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.0/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            text-align: center; 
+            margin: 0;
+            background: #121212;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        h1 { margin-top: 30px; text-shadow: 0 0 10px #bb86fc; z-index: 10; }
+        #status { font-weight: bold; margin: 20px; color: #03dac6; z-index: 10; }
+        
+        /* This container mirrors the layout we want Validator to see */
+        .game-container {
+            background: rgba(30, 30, 30, 0.9);
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            width: 80%;
+            max-width: 600px;
+            border: 1px solid #333;
+            z-index: 20;
+            position: relative;
+        }
+
+        .hidden { display: none !important; }
+        
+        #canvas-area { width: 100%; display: flex; flex-direction: column; align-items: center; }
+        canvas { 
+            border: 2px solid #555; 
+            background: #fff; 
+            cursor: crosshair; 
+            border-radius: 4px;
+        }
+
+        #rps-area { display: none; }
+        .rps-btn { 
+            padding: 15px 25px; margin: 10px; font-size: 24px; cursor: pointer; 
+            background: #333; color: white; border: 2px solid #555; border-radius: 10px;
+            transition: 0.2s;
+        }
+        .rps-btn:hover { background: #444; border-color: #bb86fc; transform: scale(1.1); }
+        .rps-btn:disabled { opacity: 0.3; cursor: not-allowed; transform: none; }
+        .rps-challenge { font-size: 1.2em; color: #ffeb3b; margin-bottom: 15px; }
+
+        #chat-area { 
+            display: flex; flex-direction: column; height: 300px;
+        }
+        #chat-messages {
+            flex-grow: 1; border: 1px solid #444; background: #222; 
+            overflow-y: auto; padding: 10px; text-align: left; margin-bottom: 10px;
+            border-radius: 5px;
+        }
+        .msg { margin: 5px 0; }
+        .msg.me { color: #bb86fc; text-align: right; }
+        .msg.them { color: #03dac6; text-align: left; }
+        .input-group { display: flex; }
+        #chat-input { flex-grow: 1; padding: 10px; border-radius: 5px 0 0 5px; border: none; }
+        #chat-send { padding: 10px 20px; border-radius: 0 5px 5px 0; border: none; background: #bb86fc; color: black; cursor: pointer; font-weight: bold; }
+
+        #task-info { font-size: 1.5em; margin-bottom: 15px; color: #ffb74d; }
+    </style>
+</head>
+<body>
+    <h1 id="lbl-title">Are you Human?</h1>
+    <div id="status">Connecting...</div>
+    
+    <div id="match-container" class="game-container hidden">
+        <div id="task-info"></div>
+        <div id="partner-info" style="font-size: 0.9em; color: #888; margin-bottom: 10px;"></div>
+
+        <div id="canvas-area" class="hidden">
+            <p id="lbl-draw-topic" style="font-size: 1.2em; font-weight: bold; color: white;"></p>
+            <canvas id="trackCanvas" width="400" height="300"></canvas>
+        </div>
+
+        <div id="rps-area">
+            <div id="rps-instruction" class="rps-challenge">Waiting for opponent...</div>
+            <div id="rps-buttons">
+                <button class="rps-btn" onclick="sendRps('ROCK')" disabled>✊</button>
+                <button class="rps-btn" onclick="sendRps('PAPER')" disabled>✋</button>
+                <button class="rps-btn" onclick="sendRps('SCISSORS')" disabled>✌️</button>
+            </div>
+        </div>
+
+        <div id="chat-area" class="hidden">
+            <div id="chat-messages"></div>
+            <div class="input-group">
+                <input type="text" id="chat-input" placeholder="..." oninput="sendTyping()" onkeypress="if(event.keyCode==13) sendChat()"/>
+                <button id="chat-send" onclick="sendChat()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const DICT = {
+            'en': {
+                'title': 'Are you Human?', 'connecting': 'Connecting...', 'connected': 'Connected. Waiting for queue...',
+                'matched': 'Matched!', 'mission': 'Mission: ', 'partner_lang': 'Validator Language: ',
+                'draw_topic': 'Please draw: ', 'rps_wait': "Waiting for opponent's move...",
+                'rps_win': "Opponent chose {move}. You must WIN!", 'rps_sent': 'Sent {move}. Waiting...',
+                'chat_placeholder': 'Type here...', 'send': 'Send',
+                'verified': 'Verified Human.', 'denied': 'Access Denied (Robot).',
+                'partner_dc': 'Partner disconnected.', 'retry': 'Retrying...',
+                'lang_en': 'English', 'lang_ko': 'Korean', 'lang_ja': 'Japanese', 'lang_zh': 'Chinese', 'lang_fr': 'French',
+                'ROCK': 'Rock', 'PAPER': 'Paper', 'SCISSORS': 'Scissors'
+            },
+            'ko': {
+                'title': '당신은 사람입니까?', 'connecting': '연결 중...', 'connected': '연결됨. 대기열 진입...',
+                'matched': '매칭 완료!', 'mission': '미션: ', 'partner_lang': '검증자 언어: ',
+                'draw_topic': '그려주세요: ', 'rps_wait': "상대방의 선택을 기다리는 중...",
+                'rps_win': "상대가 {move}를 냈습니다. 이겨보세요!", 'rps_sent': '{move} 제출. 대기 중...',
+                'chat_placeholder': '입력하세요...', 'send': '전송',
+                'verified': '인증 성공 (사람).', 'denied': '접속 거부 (로봇).',
+                'partner_dc': '상대방 연결 끊김.', 'retry': '재시도 중...',
+                'lang_en': '영어', 'lang_ko': '한국어', 'lang_ja': '일본어', 'lang_zh': '중국어', 'lang_fr': '프랑스어',
+                'ROCK': '바위', 'PAPER': '보', 'SCISSORS': '가위'
+            },
+            'ja': {
+                'title': 'あなたは人間ですか？', 'connecting': '接続中...', 'connected': '接続済み。待機中...',
+                'matched': 'マッチしました！', 'mission': 'ミッション: ', 'partner_lang': '検証者の言語: ',
+                'draw_topic': '描いてください: ', 'rps_wait': "相手の手を待っています...",
+                'rps_win': "相手は {move} を出しました。勝ってください！", 'rps_sent': '{move} 送信。待機中...',
+                'chat_placeholder': '入力...', 'send': '送信',
+                'verified': '認証成功。', 'denied': 'アクセス拒否。',
+                'partner_dc': '相手が切단했습니다.', 'retry': '再試行中...',
+                'lang_en': '英語', 'lang_ko': '韓国語', 'lang_ja': '日本語', 'lang_zh': '中国語', 'lang_fr': 'フランス語',
+                'ROCK': 'グー', 'PAPER': 'パー', 'SCISSORS': 'チョキ'
+            },
+            'zh': {
+                'title': '你是人类吗？', 'connecting': '连接中...', 'connected': '已连接。等待队列...',
+                'matched': '匹配成功！', 'mission': '任务: ', 'partner_lang': '验证者语言: ',
+                'draw_topic': '请画: ', 'rps_wait': "等待对手...",
+                'rps_win': "对手出了 {move}。你必须赢！", 'rps_sent': '已发送 {move}。等待中...',
+                'chat_placeholder': '输入...', 'send': '发送',
+                'verified': '验证通过。', 'denied': '拒绝访问。',
+                'partner_dc': '对方已断开。', 'retry': '重试中...',
+                'lang_en': '英语', 'lang_ko': '韩语', 'lang_ja': '日语', 'lang_zh': '中文', 'lang_fr': '法语',
+                'ROCK': '石头', 'PAPER': '布', 'SCISSORS': '剪刀'
+            },
+            'fr': {
+                'title': 'Êtes-vous humain ?', 'connecting': 'Connexion...', 'connected': 'Connecté. En attente...',
+                'matched': 'Correspondance trouvée !', 'mission': 'Mission : ', 'partner_lang': 'Langue du validateur : ',
+                'draw_topic': 'Dessinez : ', 'rps_wait': "En attente de l'adversaire...",
+                'rps_win': "L'adversaire a choisi {move}. Gagnez !", 'rps_sent': '{move} envoyé. En attente...',
+                'chat_placeholder': 'Tapez ici...', 'send': 'Envoyer',
+                'verified': 'Vérifié Humain.', 'denied': 'Accès refusé.',
+                'partner_dc': 'Partenaire déconnecté.', 'retry': 'Nouvel essai...',
+                'lang_en': 'Anglais', 'lang_ko': 'Coréen', 'lang_ja': 'Japonais', 'lang_zh': 'Chinois', 'lang_fr': 'Français',
+                'ROCK': 'Pierre', 'PAPER': 'Feuille', 'SCISSORS': 'Ciseaux'
+            }
+        };
+
+        var stompClient = null;
+        var canvas = document.getElementById('trackCanvas');
+        var ctx = canvas.getContext('2d');
+        var isDrawing = false;
+        var currentTask = null;
+        var myUuid = getOrCreateUuid();
+        var urlParams = new URLSearchParams(window.location.search);
+        var myLang = urlParams.get('lang') || 'en';
+
+        function t(key, params) {
+            var text = (DICT[myLang] && DICT[myLang][key]) || DICT['en'][key] || key;
+            if (params) {
+                for (var k in params) text = text.replace('{' + k + '}', params[k]);
+            }
+            return text;
+        }
+
+        document.getElementById('lbl-title').innerText = t('title');
+        document.getElementById('status').innerText = t('connecting');
+        document.getElementById('chat-input').placeholder = t('chat_placeholder');
+        document.getElementById('chat-send').innerText = t('send');
+
+        function getOrCreateUuid() {
+            var uuid = localStorage.getItem('h2h_captcha_uuid');
+            if (!uuid) {
+                uuid = generateUUID();
+                localStorage.setItem('h2h_captcha_uuid', uuid);
+            }
+            return uuid;
+        }
+
+        function generateUUID() { 
+            var d = new Date().getTime();
+            if (typeof performance !== 'undefined' && typeof performance.now === 'function'){ d += performance.now(); }
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                var r = (d + Math.random() * 16) % 16 | 0; d = Math.floor(d / 16);
+                return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+            });
+        }
+
+        function connect() {
+            var socket = new SockJS('/ws-captcha');
+            stompClient = Stomp.over(socket);
+            stompClient.connect({}, function (frame) {
+                document.getElementById('status').innerText = t('connected');
+                
+                stompClient.subscribe('/topic/private.' + myUuid, function (message) {
+                    var body = message.body;
+                    try {
+                        var json = JSON.parse(body);
+                        if (json.taskType) {
+                            showMatch(json);
+                        } else if (json.type) { 
+                            handleGameData(json);
+                        } 
+                    } catch(e) {
+                         handleResult(body);
+                    }
+                });
+
+                stompClient.send("/app/join/client", {}, JSON.stringify({'uuid': myUuid, 'language': myLang}));
+            });
+        }
+
+        function showMatch(matchInfo) {
+            updateTaskUI(matchInfo.taskType);
+            document.getElementById('match-container').classList.remove('hidden');
+            var pLangName = t('lang_' + matchInfo.validatorLanguage);
+            document.getElementById('partner-info').innerText = t('partner_lang') + pLangName;
+        }
+
+        function updateTaskUI(taskData) {
+             var taskName = taskData;
+             var topic = "";
+             if (taskData.startsWith("DRAWING:")) {
+                 var parts = taskData.split(":");
+                 taskName = parts[0];
+                 topic = parts[1];
+             }
+
+             currentTask = taskName;
+             document.getElementById('status').innerText = t('matched');
+             document.getElementById('task-info').innerText = t('mission') + taskName;
+
+             hideAll();
+
+             if (currentTask === 'MOUSE_TRACKING') {
+                // Just wait
+             } else if (currentTask === 'DRAWING') {
+                document.getElementById('canvas-area').classList.remove('hidden');
+                document.getElementById('lbl-draw-topic').innerText = t('draw_topic') + topic;
+                canvas.style.display = 'block';
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+             } else if (currentTask === 'RPS') {
+                document.getElementById('rps-area').style.display = 'block';
+                document.getElementById('rps-instruction').innerText = t('rps_wait');
+                var btns = document.getElementsByClassName('rps-btn');
+                for(var i=0; i<btns.length; i++) btns[i].disabled = true;
+             } else if (currentTask === 'CHAT') {
+                document.getElementById('chat-area').classList.remove('hidden');
+             }
+        }
+
+        // --- Drawing Logic ---
+        canvas.onmousedown = function(e) { 
+            isDrawing = true; 
+            ctx.beginPath();
+            var pos = getCanvasPos(e);
+            ctx.moveTo(pos.x, pos.y);
+        };
+        canvas.onmouseup = function() { isDrawing = false; };
+        canvas.onmouseleave = function() { isDrawing = false; };
+        canvas.addEventListener('mousemove', function(evt) {
+            var pos = getCanvasPos(evt);
+            if (isDrawing) {
+                ctx.lineTo(pos.x, pos.y);
+                ctx.stroke();
+            }
+            // Send Canvas Local Logic?? 
+            // NO, we rely on Global Mouse Tracking to send coordinate, 
+            // Validator will receive isDown and global 0-1 coord.
+            // Validator maps this 0-1 coord to its mirror view.
+        });
+        function getCanvasPos(evt) {
+            var rect = canvas.getBoundingClientRect();
+            return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+        }
+
+        // --- Global Mouse Tracking & Screen Size ---
+        document.addEventListener('mousemove', function(evt) {
+            // 1. Global Coordinates (0.0 - 1.0) for Ghost Pointer
+            var relX = evt.clientX / window.innerWidth;
+            var relY = evt.clientY / window.innerHeight;
+            
+            // 2. Canvas Coordinates (0.0 - 1.0) for Drawing
+            var cx = -1.0;
+            var cy = -1.0;
+            
+            // Only calculate if canvas is visible
+            if (canvas.offsetParent !== null) {
+                var rect = canvas.getBoundingClientRect();
+                // Check if mouse is inside/near canvas bounds logic handled by isDown usually,
+                // but we send coordinates relative to canvas regardless if isDown.
+                cx = (evt.clientX - rect.left) / rect.width;
+                cy = (evt.clientY - rect.top) / rect.height;
+            }
+            
+            stompClient.send("/app/mouse", {}, JSON.stringify({
+                'x': relX, 'y': relY, 
+                'cx': cx, 'cy': cy,
+                'isDown': isDrawing,
+                'w': window.innerWidth,
+                'h': window.innerHeight
+            }));
+        });
+
+        function handleGameData(data) {
+            if (data.type === 'TASK_CHANGE') {
+                updateTaskUI(data.payload);
+            } else if (data.type === 'CHAT') {
+                addMessage("Validator", data.payload, 'them');
+            } else if (data.type === 'RPS_CHALLENGE') {
+                var oppMove = data.payload; 
+                var translatedMove = t(oppMove);
+                document.getElementById('rps-instruction').innerText = t('rps_win', {move: translatedMove});
+                var btns = document.getElementsByClassName('rps-btn');
+                for(var i=0; i<btns.length; i++) btns[i].disabled = false;
+            }
+        }
+
+        function sendRps(choice) {
+            stompClient.send("/app/game", {}, JSON.stringify({ 'type': 'RPS', 'payload': choice }));
+            document.getElementById('rps-instruction').innerText = t('rps_sent', {move: t(choice)});
+            var btns = document.getElementsByClassName('rps-btn');
+            for(var i=0; i<btns.length; i++) btns[i].disabled = true;
+        }
+
+        function sendTyping() {
+            var text = document.getElementById('chat-input').value;
+            stompClient.send("/app/game", {}, JSON.stringify({ 'type': 'CHAT_TYPING', 'payload': text }));
+        }
+
+        function sendChat() {
+            var input = document.getElementById('chat-input');
+            var text = input.value;
+            if(!text) return;
+            stompClient.send("/app/game", {}, JSON.stringify({ 'type': 'CHAT', 'payload': text }));
+            addMessage("Me", text, 'me');
+            input.value = '';
+        }
+
+        function addMessage(sender, text, type) {
+            var div = document.createElement('div');
+            div.className = 'msg ' + type;
+            div.innerText = sender + ": " + text;
+            var box = document.getElementById('chat-messages');
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
+        }
+        
+        function handleResult(result) {
+            if (result === 'SUCCESS') {
+                alert(t('verified'));
+                document.getElementById('status').innerText = t('verified');
+            } else if (result === 'RETRY') {
+                alert(t('retry'));
+                location.reload(); 
+            } else if (result === 'FAILED_FINAL') {
+                alert(t('denied'));
+                document.getElementById('status').innerText = t('denied');
+            } else if (result === 'Partner disconnected') {
+                 alert(t('partner_dc'));
+                 location.reload();
+            }
+            hideAll();
+            document.getElementById('match-container').classList.add('hidden');
+        }
+
+        function hideAll() {
+            document.getElementById('canvas-area').classList.add('hidden');
+            document.getElementById('rps-area').style.display = 'none';
+            document.getElementById('chat-area').classList.add('hidden');
+        }
+
+        connect();
+    </script>
+</body>
+</html>

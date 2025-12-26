@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>H2H Captcha - Home</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            text-align: center; 
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+        }
+        h1 { font-size: 3em; margin-bottom: 0.1em; text-shadow: 0 0 10px #00d4ff; }
+        p { font-size: 1.2em; color: #aaa; margin-bottom: 2em; }
+        .container {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 50px;
+            border-radius: 30px;
+            backdrop-filter: blur(15px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            width: 80%;
+            max-width: 600px;
+        }
+        select {
+            padding: 12px 25px;
+            font-size: 18px;
+            border-radius: 12px;
+            border: 1px solid #444;
+            margin-bottom: 30px;
+            cursor: pointer;
+            background: #1e1e1e;
+            color: #fff;
+            outline: none;
+        }
+        select:hover { border-color: #00d4ff; }
+        .btn-group { display: flex; flex-direction: column; gap: 15px; align-items: center; }
+        .btn { 
+            display: block;
+            width: 100%;
+            max-width: 300px;
+            padding: 18px 0;
+            font-size: 20px; 
+            cursor: pointer; 
+            text-decoration: none;
+            color: white;
+            border-radius: 15px;
+            transition: all 0.3s;
+            font-weight: bold;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .client-btn { 
+            background: linear-gradient(45deg, #6200ee, #03dac6); 
+            box-shadow: 0 4px 15px rgba(98, 0, 238, 0.3);
+        }
+        .validator-btn { 
+            background: #333;
+            color: #bbb;
+        }
+        .btn:hover { transform: translateY(-3px); box-shadow: 0 8px 25px rgba(0, 212, 255, 0.4); border-color: #00d4ff; color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 id="lbl-title">Human-to-Human Captcha</h1>
+        <p id="lbl-subtitle">Real-time verification by humans, for humans.</p>
+        
+        <select id="language-select" onchange="applyTranslation()">
+            <option value="en">English</option>
+            <option value="ko">한국어 (Korean)</option>
+            <option value="ja">日本語 (Japanese)</option>
+            <option value="zh">中文 (Chinese)</option>
+            <option value="fr">Français (French)</option>
+        </select>
+        
+        <div class="btn-group">
+            <a href="#" id="btn-client" onclick="navigate('client.html')" class="btn client-btn">I am a User (Client)</a>
+            <a href="#" id="btn-validator" onclick="navigate('validator.html')" class="btn validator-btn">I am a Validator</a>
+        </div>
+    </div>
+
+    <script>
+        const DICT = {
+            'en': {
+                'title': 'Human-to-Human Captcha',
+                'subtitle': 'Real-time verification by humans, for humans.',
+                'btn_client': 'I am a User (Client)',
+                'btn_validator': 'I am a Validator'
+            },
+            'ko': {
+                'title': 'H2H 캡차 시스템',
+                'subtitle': '로봇이 아닌, 실제 사람이 검증하는 보안 솔루션',
+                'btn_client': '사용자로 참여 (인증하기)',
+                'btn_validator': '검증자로 참여 (감시하기)'
+            },
+            'ja': {
+                'title': 'H2H キャプチャ',
+                'subtitle': '機械ではなく、人が直接検証するセキュリティ',
+                'btn_client': 'ユーザーとして参加',
+                'btn_validator': '検証者として参加'
+            },
+            'zh': {
+                'title': '人与人验证码',
+                'subtitle': '由真人而非机器进行实时验证',
+                'btn_client': '我是用户',
+                'btn_validator': '我是验证者'
+            },
+            'fr': {
+                'title': 'Captcha H2H',
+                'subtitle': 'Vérification en temps réel par des humains.',
+                'btn_client': 'Je suis un utilisateur',
+                'btn_validator': 'Je suis un validateur'
+            }
+        };
+
+        function applyTranslation() {
+            const lang = document.getElementById('language-select').value;
+            const t = DICT[lang] || DICT['en'];
+            
+            document.getElementById('lbl-title').innerText = t['title'];
+            document.getElementById('lbl-subtitle').innerText = t['subtitle'];
+            document.getElementById('btn-client').innerText = t['btn_client'];
+            document.getElementById('btn-validator').innerText = t['btn_validator'];
+        }
+
+        function navigate(page) {
+            var lang = document.getElementById('language-select').value;
+            if (page === 'client.html') {
+                localStorage.removeItem('h2h_captcha_uuid');
+            }
+            window.location.href = page + '?lang=' + lang;
+        }
+
+        // Initialize with default or browser lang
+        applyTranslation();
+    </script>
+</body>
+</html>
