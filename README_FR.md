@@ -52,7 +52,7 @@ Le système prend en charge quatre modes de vérification contrôlés par le Val
 ## 🚀 Commencer
 
 ### Prérequis
--   **Java 24** (ou Docker)
+-   **Java 21** (ou Docker)
 -   Port 8080 disponible
 
 ### Lancer avec Docker (Recommandé)

@@ -55,7 +55,7 @@ The system supports four distinct verification modes, controlled by the Validato
 ## 🚀 Getting Started
 
 ### Prerequisites
--   **Java 24** (or Docker)
+-   **Java 21** (or Docker)
 -   Port 8080 available
 
 ### Running with Docker (Recommended)

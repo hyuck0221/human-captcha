@@ -2,7 +2,7 @@
 # We use a base image that supports Java 24. 
 # Note: As Java 24 is bleeding edge, we assume openjdk:24-slim or similar is available.
 # If strict 24 is not available, we might need to use a nightly build or downgrade to 23/21.
-FROM openjdk:24-slim AS build
+FROM openjdk:21-slim AS build
 
 WORKDIR /app
 
@@ -22,7 +22,7 @@ RUN chmod +x ./gradlew
 RUN ./gradlew bootJar -x test --no-daemon
 
 # Stage 2: Run the application
-FROM openjdk:24-slim
+FROM openjdk:21-slim
 
 WORKDIR /app
 
