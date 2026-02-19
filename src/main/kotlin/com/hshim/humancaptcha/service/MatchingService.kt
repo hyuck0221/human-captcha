@@ -148,25 +148,19 @@ class MatchingService(
     fun recordFailure(clientId: String) {
         val state = clientStates[clientId] ?: return
         state.failures++
-        
+
         val match = activeMatches.remove(clientId)
         if (match != null) {
             activeMatches.remove(match.validatorId)
-            // Notify validator job done
+            // 세션 종료 알림만 전송 — 재큐잉은 검증자가 리로드 후 재접속 시 /app/join/validator에서 처리
             template.convertAndSend("/topic/private.${match.validatorId}", "Session Ended")
-            
-            // Re-queue validator with preserved language
-            val vLang = validatorLanguages[match.validatorId] ?: "en"
-            registerValidator(match.validatorId, vLang)
         }
 
         if (state.failures >= 3) {
-            // Final failure logic
             template.convertAndSend("/topic/private.$clientId", "FAILED_FINAL")
         } else {
-            // Re-queue client with preserved language
+            // 클라이언트는 페이지 리로드 후 /app/join/client로 재등록
             template.convertAndSend("/topic/private.$clientId", "RETRY")
-            // registerClient will be called again when page reloads and sends join request
         }
     }
 
@@ -174,14 +168,11 @@ class MatchingService(
         val match = activeMatches.remove(clientId)
         if (match != null) {
             activeMatches.remove(match.validatorId)
-            template.convertAndSend("/topic/private.${match.validatorId}", "SUCCESS")
-            
-            // Re-queue validator
-            val vLang = validatorLanguages[match.validatorId] ?: "en"
-            registerValidator(match.validatorId, vLang)
+            // 세션 종료 알림만 전송 — 재큐잉은 검증자가 리로드 후 재접속 시 /app/join/validator에서 처리
+            template.convertAndSend("/topic/private.${match.validatorId}", "Session Ended")
         }
-        
-        clientStates.remove(clientId) // Identity cleared only on SUCCESS
+
+        clientStates.remove(clientId) // 성공 시에만 클라이언트 상태 초기화
         template.convertAndSend("/topic/private.$clientId", "SUCCESS")
     }
 

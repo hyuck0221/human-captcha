@@ -16,6 +16,8 @@ class WebSocketConfig : WebSocketMessageBrokerConfigurer {
     }
 
     override fun registerStompEndpoints(registry: StompEndpointRegistry) {
-        registry.addEndpoint("/ws-captcha").withSockJS()
+        registry.addEndpoint("/ws-captcha")
+            .setAllowedOriginPatterns("*")
+            .withSockJS()
     }
 }
