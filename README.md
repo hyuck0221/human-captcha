@@ -6,9 +6,6 @@
   <a href="README_FR.md">Français</a>
 </p>
 
-<p align="center">
-  <img src="src/main/resources/image/logo.png" alt="H2H-CAPTCHA Logo" width="200" />
-</p>
 # Human-to-Human CAPTCHA (H2H-CAPTCHA)
 
 > **"Real-time verification by humans, for humans."**
@@ -19,81 +16,130 @@ H2H-CAPTCHA is an innovative security solution that replaces automated Turing te
 
 ## 🏗 Architecture
 
-The system is built on a robust event-driven architecture using **Spring Boot** and **WebSockets**.
+The system is built entirely on **React + Supabase** — no dedicated backend server required.
 
-### 1. Backend (Kotlin + Spring Boot)
--   **WebSocket (STOMP)**: Handles real-time bi-directional communication.
--   **Matching Service**:
-    -   Manages separate queues for Clients and Validators.
-    -   Performs instant 1:1 matching.
-    -   Handles session lifecycle (connect, disconnect, timeout).
--   **In-Memory Management**: Operates entirely in-memory (`ConcurrentHashMap`) for maximum speed. Client history (blacklist and failure counts) is preserved for 30 minutes even after disconnects to enhance security.
+### Frontend (React + TypeScript + Vite)
+- **Supabase Realtime Broadcast**: Delivers mouse tracking data at up to 40 events/second without database writes.
+- **Supabase Presence**: Detects partner disconnection in real time.
+- **Postgres Changes**: Notifies waiting users the moment a match is created.
 
-### 2. Frontend (Vanilla JS + HTML5)
--   **Screen Mirroring**:
-    -   Captures Client's mouse coordinates and screen resolution.
-    -   Validator's dashboard dynamically resizes to match the Client's aspect ratio, ensuring pixel-perfect observation.
--   **Interactive Canvas**:
-    -   Dual-coordinate system: Sends both Global (screen-relative) and Local (canvas-relative) coordinates to ensure drawing accuracy across different screen sizes.
+### Database & Realtime (Supabase + PostgreSQL)
+- **`queued_participants`** table: Manages the waiting queue for Clients and Validators.
+- **`matches`** table: Stores active and completed match records.
+- **`client_states`** table: Tracks failure counts and validator blacklists per client.
+- **`try_match()`** RPC: Atomic 1:1 matching using `FOR UPDATE SKIP LOCKED` to prevent race conditions.
+- **`record_decision()`** RPC: Handles approve/reject verdicts and updates failure counts.
+- **`handle_disconnect()`** RPC: Cleans up queue entries and active matches on disconnect.
+
+### Channel Strategy
+```
+queued_participants  → Postgres Changes  (waiting for match)
+session:{match_id}   → Broadcast         (mouse / game / result events)
+session:{match_id}   → Presence          (disconnect detection)
+```
 
 ---
 
 ## 🎮 Interactive Challenges
 
-The system supports four distinct verification modes, controlled by the Validator:
+The system supports four verification modes, controlled by the Validator:
 
-1.  **🖱️ Mouse Tracking (Passive)**
-    -   **Logic**: The Validator observes the Client's natural mouse movements.
-    -   **Goal**: Detect bot-like linear jumps or instant teleports.
-    -   **Tech**: Real-time relative coordinate broadcasting (0.0 - 1.0).
+1. **🖱️ Mouse Tracking (Passive)**
+   - The Validator observes the Client's natural mouse movements.
+   - Goal: Detect bot-like linear jumps or instant teleports.
+   - Tech: Realtime Broadcast at 30 fps (no DB writes).
 
-2.  **✏️ Drawing (Active)**
-    -   **Logic**: Validator assigns a topic (e.g., "Apple"). Client draws it on a canvas.
-    -   **Goal**: Verify human creativity and motor control.
-    -   **Tech**: Canvas API with relative coordinate synchronization.
+2. **✏️ Drawing (Active)**
+   - Validator assigns a topic (e.g., "Apple"). Client draws on a canvas.
+   - Goal: Verify human creativity and motor control.
+   - Tech: Dual-coordinate system (global + canvas-relative).
 
-3.  **👊 Rock-Paper-Scissors (Reaction)**
-    -   **Logic**: Validator sends a challenge (e.g., "Rock"). Client must choose the winning move (e.g., "Paper") within a reasonable time.
-    -   **Goal**: Test cognitive response and rule understanding.
+3. **👊 Rock-Paper-Scissors (Reaction)**
+   - Validator sends a challenge move. Client must respond with the winning move.
+   - Goal: Test cognitive response and rule understanding.
 
-4.  **💬 Chat (Turing)**
-    -   **Logic**: Free-form text conversation.
-    -   **Goal**: The ultimate Turing test.
-    -   **Tech**: Real-time messaging with "Typing..." indicators.
+4. **💬 Chat (Turing)**
+   - Free-form text conversation with real-time "Typing..." indicators.
+   - Goal: The ultimate Turing test.
 
 ---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
--   **Java 21** (or Docker)
--   Port 8080 available
+- **Node.js** 18+
+- A **Supabase** project ([supabase.com](https://supabase.com))
 
-### Running with Docker (Recommended)
-This handles all dependencies automatically.
+### 1. Database Setup
+
+Run the migration in your Supabase SQL Editor:
 
 ```bash
-docker-compose up --build
+# File: supabase/migrations/001_h2h_captcha.sql
 ```
 
-### Running Manually
+Then enable Realtime for the `matches` table in the Supabase Dashboard → Database → Replication.
+
+### 2. Environment Variables
+
 ```bash
-./gradlew bootRun
+cp .env.local.example .env.local
+# Fill in your Supabase URL and anon key
 ```
+
+```env
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key-here
+```
+
+### 3. Install & Run
+
+```bash
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`.
 
 ### How to Use
-1.  Open `http://localhost:8080`.
-2.  **Tab 1**: Select **"I am a User (Client)"**.
-3.  **Tab 2**: Select **"I am a Validator"**.
-4.  The system will match you instantly.
-5.  Use the Validator console to switch tasks and verify the Client.
+1. **Tab 1**: Select **"I am a User (Client)"**.
+2. **Tab 2**: Select **"I am a Validator"**.
+3. The system matches you instantly.
+4. Use the Validator console to switch tasks and verify the Client.
 
 ---
 
 ## 🛡️ Security Features
--   **UUID-based Routing**: Each session creates a unique, ephemeral UUID for secure message routing.
--   **Isolation**: Clients cannot communicate with other Clients.
--   **Privacy**: No IP logging or persistent storage. Data exists only during the active WebSocket session.
+- **UUID-based Routing**: Each session uses a unique UUID stored in `localStorage` for secure, persistent identity across reconnects.
+- **Isolation**: Clients cannot communicate with other Clients.
+- **Validator Blacklist**: A Client cannot be re-matched with the same Validator (tracked in `client_states`).
+- **Failure Tracking**: Clients are permanently blocked after 3 consecutive rejections.
+- **Row Level Security**: All Supabase tables enforce RLS; sensitive operations run via `SECURITY DEFINER` functions.
 
 ---
+
+## 🗂 Project Structure
+
+```
+├── src/
+│   ├── hooks/
+│   │   └── useSupabase.ts     # Main hook (matching + broadcast + presence)
+│   ├── lib/
+│   │   └── supabase.ts        # Supabase client singleton
+│   ├── pages/
+│   │   ├── ClientPage.tsx
+│   │   └── ValidatorPage.tsx
+│   ├── types/
+│   │   └── index.ts           # MatchRow, SessionBroadcast, etc.
+│   └── i18n/
+│       └── translations.ts    # 5-language support
+├── supabase/
+│   └── migrations/
+│       └── 001_h2h_captcha.sql
+├── .env.local                 # Supabase credentials (gitignored)
+└── vite.config.ts
+```
+
+---
+
 © 2025 H2H Captcha Project.
